@@ -472,6 +472,33 @@ test('POING: land on the moving ball, grab the chain, and drop back off', () => 
   assert.ok(game.player.vy > 0);
 });
 
+test('POING: jump from the lower right ledge onto the ball and climb through the shaft', () => {
+  const game = new Game();
+  game.reset(4);
+  game.time = .1;
+  game.moveProps();
+  position(game, 3352, 688);
+  game.player.invulnerable = 5;
+  const ball = game.props.find(prop => prop.type === 8 && prop.x === 3171);
+  game.input('left', true);
+  for (let frame = 0; frame < 210 && game.player.riding !== ball; frame++) {
+    if (frame === 51) game.input('jump', true);
+    if (frame === 65) game.input('jump', false);
+    if (frame === 72) game.input('left', false);
+    game.step(STEP);
+  }
+  assert.equal(game.player.riding, ball);
+  assert.ok(game.player.y - game.player.height >= 576, 'standing head clears the lintel');
+  game.input('jump', true);
+  for (let i = 0; i < 110 && !game.player.hanging; i++) game.step(STEP);
+  assert.equal(game.player.hanging?.currentY, 411);
+  game.input('jump', false);
+  game.input('right', true);
+  game.input('jump', true);
+  advance(game, .55);
+  assert.ok(game.player.x > 3316 && game.player.y < 411);
+});
+
 test('ramp joins overlap both endpoints, preserving the grass at the seam', () => {
   const terrain = sceneryTerrain(3);
   assert.ok(terrain.slopeEnds.size > 0);

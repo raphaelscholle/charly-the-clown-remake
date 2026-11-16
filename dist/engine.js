@@ -64,10 +64,20 @@
       checkpoints: events.filter(item => item.type === 3),
     };
     if (number === 4) {
+      const ball = value.props.find(prop => prop.type === 8 && prop.x === 3171 && prop.y === 587);
       const chain = value.props.find(prop => prop.type === 12 && prop.x === 3316 && prop.y === 411);
-      if (chain) {
-        // Extend the grip to the ball side of the shaft wall.
-        value.props.push({ ...chain, id: -1, x: 3275, w: chain.x - 3275 });
+      if (ball && chain) {
+        // Leave standing room under the lintel and open a jump route to the cable.
+        ball.y = 613;
+        ball.bobHeight = 4;
+        const shaftLeft = 3232;
+        const shaftRight = 3280;
+        for (let y = 448; y <= 560; y += SIZE) {
+          value.art[y / SIZE + 3].fill(0, shaftLeft / SIZE, shaftRight / SIZE);
+        }
+        value.collision[560 / SIZE + 2].fill(0, shaftLeft / SIZE, shaftRight / SIZE);
+        const gripStart = 3250;
+        value.props.push({ ...chain, id: -1, x: gripStart, w: chain.x - gripStart });
       }
     }
     stages.set(number, value);
@@ -253,7 +263,7 @@
           const endpoint = prop.pathX > 0 && Math.abs(prop.pathX - prop.x) < 185 ? prop.pathX : prop.x + 32;
           const phase = this.time * 1.45 + prop.tag * Math.PI / 180;
           prop.currentX = prop.x + (endpoint - prop.x) * (.5 - Math.cos(phase) * .5);
-          prop.currentY = prop.y + Math.sin(phase) * 8;
+          prop.currentY = prop.y + Math.sin(phase) * (prop.bobHeight ?? 8);
         } else if (prop.type === 13 && prop.w < 80) {
           prop.currentY = prop.y + Math.sin(this.time * .92 + prop.id) * 22;
         }
