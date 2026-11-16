@@ -11,9 +11,17 @@
   const CRUMBLE_ANIMATION = 6 * CRUMBLE_FRAME;
   const BALL_RADIUS = 4;
   const GRIP_HEIGHT = 38;
+  const FOOT_REACH = RADIUS - 2;
   const clamp = (value, min, max) => Math.max(min, Math.min(value, max));
   const near = (a, b, tolerance) => Math.abs(a - b) < tolerance;
   const range = (a, b) => [Math.floor(a), Math.floor(b)];
+
+  function ballSurface(ball, x, left, topY) {
+    const radius = ball.w / 2;
+    const distance = Math.max(0, Math.abs(x - (left + radius)) - FOOT_REACH);
+    if (distance > radius) return Infinity;
+    return topY + ball.h / 2 * (1 - Math.sqrt(1 - (distance / radius) ** 2));
+  }
   const decodeRows = (rows, columns, ArrayType) => rows.map(runs => {
     const row = new ArrayType(columns);
     let column = 0;
@@ -338,7 +346,7 @@
       p.vy = clamp(p.vy + GRAVITY * dt, -605, 420);
       const previousX = p.x;
       this.moveAcross(p, p.x + p.vx * dt);
-      this.moveVertical(p, p.y + p.vy * dt);
+      this.moveVertical(p, p.y + p.vy * dt, previousX);
       const distance = Math.abs(p.x - previousX);
       p.walking = p.grounded && distance > dt * 13;
       if (p.grounded) {
@@ -369,14 +377,15 @@
       if (p.x !== next || near(p.x, old, .04)) p.vx *= .4;
     }
 
-    moveVertical(p, nextY) {
+    moveVertical(p, nextY, previousX = p.x) {
       const before = p.y;
       if (p.dropCableY !== undefined && (before > p.dropCableY + GRIP_HEIGHT + 6 || before < p.dropCableY - 2)) p.dropCableY = undefined;
       const reach = p.vy >= 0 ? nextY : nextY - p.height;
       const origin = p.vy >= 0 ? before : before - p.height;
       const rising = p.vy < 0;
       const wasGrounded = p.grounded;
-      const [firstColumn, lastColumn] = range((p.x - RADIUS + 2) / SIZE, (p.x + RADIUS - 2) / SIZE);
+      const previousRide = p.riding;
+      const [firstColumn, lastColumn] = range((p.x - FOOT_REACH) / SIZE, (p.x + FOOT_REACH) / SIZE);
       const [firstRow, lastRow] = range(Math.min(origin, reach) / SIZE + 1, Math.max(origin, reach) / SIZE + 3);
       p.riding = null;
       p.grounded = false;
@@ -441,10 +450,21 @@
         for (const prop of this.props) {
           if (!this.supports(prop) || (prop.type === 12 && prop.currentY === p.dropCableY)) continue;
           const x = prop.currentX;
-          const y = prop.currentY;
+          let y = prop.currentY;
           const inset = prop.type === 7 ? 4 : 0;
-          if (p.x + RADIUS - 2 < x + inset || p.x - RADIUS + 2 > x + prop.w - inset) continue;
-          if (origin <= y + Math.abs(prop.shiftY) + .8 && reach >= y - .5 && y < landing) {
+          if (p.x + FOOT_REACH < x + inset || p.x - FOOT_REACH > x + prop.w - inset) continue;
+          if (prop.type === 8) {
+            y = ballSurface(prop, p.x, x, y);
+            const previousTop = prop.currentY - prop.shiftY;
+            const previousSurface = ballSurface(prop, previousX, x - prop.shiftX, previousTop);
+            // Compare feet against the moving upper surface on both sides of the step.
+            // A rider follows the curve until their feet leave the ball's width.
+            const entryHeight = Math.min(previousSurface, previousTop + prop.h / 2);
+            if (previousRide !== prop && (origin > entryHeight + .5 || reach < y)) continue;
+          } else if (origin > y + Math.abs(prop.shiftY) + .8 || reach < y - .5) {
+            continue;
+          }
+          if (y < landing) {
             landing = y;
             p.riding = prop;
           }

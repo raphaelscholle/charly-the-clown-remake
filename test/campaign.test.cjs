@@ -408,6 +408,48 @@ function sceneryTerrain(number) {
 function sceneryCell(level, x, y) {
   return (y / 16 + 3) * level.columns + x / 16;
 }
+
+test('POING: falling onto either shoulder of a moving ball catches and carries Charly', () => {
+  for (const time of [1, 3]) {
+    for (const side of [-1, 1]) {
+      const game = new Game();
+      game.reset(4);
+      const ball = game.props.find(prop => prop.type === 8 && prop.x === 3171);
+      game.time = time;
+      game.moveProps();
+      game.player = game.createPlayer({
+        x: ball.currentX + ball.w / 2 + side * 20,
+        y: ball.currentY + 4,
+      });
+      game.player.vy = 380;
+      game.player.invulnerable = 3;
+      game.step(STEP);
+      assert.equal(game.player.riding, ball, `shoulder ${side} at time ${time}`);
+      assert.ok(game.player.y > ball.currentY + 3);
+      const offset = game.player.x - ball.currentX;
+      advance(game, .5);
+      assert.equal(game.player.riding, ball);
+      assert.ok(Math.abs(game.player.x - ball.currentX - offset) < .001);
+    }
+  }
+});
+
+test('a ball can be jumped through from below and landed on from above', () => {
+  const game = new Game();
+  game.reset(4);
+  const ball = game.props.find(prop => prop.type === 8 && prop.x === 2988);
+  game.time = (2 * Math.PI - ball.tag * Math.PI / 180) / 1.45;
+  game.moveProps();
+  game.player = game.createPlayer({ x: ball.currentX + ball.w / 2, y: ball.currentY + 20 });
+  game.player.vy = -175;
+  game.player.invulnerable = 3;
+  advance(game, .12);
+  assert.ok(game.player.vy < 0);
+  assert.equal(game.player.riding, null);
+  for (let i = 0; i < 100 && game.player.riding !== ball; i++) game.step(STEP);
+  assert.equal(game.player.riding, ball);
+});
+
 test('POING: land on the moving ball, grab the chain, and drop back off', () => {
   const game = new Game();
   game.reset(4);
