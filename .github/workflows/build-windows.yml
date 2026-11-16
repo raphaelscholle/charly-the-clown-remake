@@ -1,0 +1,64 @@
+name: Build Windows game
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    name: Test and package Windows x64
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run regression tests
+        run: npm test
+
+      - name: Package and verify portable ZIP
+        shell: pwsh
+        run: |
+          $staging = Join-Path $env:RUNNER_TEMP 'charly-build'
+          npm run windows:package -- "$staging"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $game = Join-Path $staging 'Charly the Clown-win32-x64'
+          $zip = Join-Path $staging 'Charly-the-Clown-Windows-x64.zip'
+          Copy-Item -LiteralPath 'LICENSE' -Destination (Join-Path $game 'LICENSE-GPL-3.0.txt')
+          Copy-Item -LiteralPath 'CONTENT-NOTICE.md' -Destination $game
+          $source = "https://github.com/$env:GITHUB_REPOSITORY/tree/$env:GITHUB_SHA"
+          Set-Content -LiteralPath (Join-Path $game 'GET-SOURCE.txt') -Value $source
+          Compress-Archive -LiteralPath $game -DestinationPath $zip -CompressionLevel Optimal
+
+          $archive = [IO.Compression.ZipFile]::OpenRead($zip)
+          try {
+            foreach ($file in @('Charly the Clown.exe', 'resources/app.asar', 'LICENSE-GPL-3.0.txt', 'CONTENT-NOTICE.md', 'GET-SOURCE.txt')) {
+              $entry = $archive.GetEntry("Charly the Clown-win32-x64/$file")
+              if ($null -eq $entry -or $entry.Length -eq 0) { throw "Missing or empty archive entry: $file" }
+            }
+          } finally {
+            $archive.Dispose()
+          }
+
+      - name: Upload Windows build
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Charly-the-Clown-Windows-x64
+          path: ${{ runner.temp }}/charly-build/Charly-the-Clown-Windows-x64.zip
+          if-no-files-found: error
+          compression-level: 0
