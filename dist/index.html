@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'">
+  <meta name="theme-color" content="#100d16">
+  <meta name="description" content="Play all 25 levels of the 1996 platformer Charly the Clown in the modern remake.">
+  <title>Charly the Clown · Run for Fun</title>
+  <link rel="icon" href="assets/charly.png" type="image/png">
+  <link rel="stylesheet" href="style.css">
+  <script src="level-data.js" defer></script>
+  <script src="engine.js" defer></script>
+  <script src="terrain.js" defer></script>
+  <script src="animation.js" defer></script>
+  <script src="renderer.js" defer></script>
+  <script src="arcade.js" defer></script>
+</head>
+<body>
+  <svg class="icons" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="play" viewBox="0 0 24 24"><path d="m8 5 12 7-12 7z" fill="currentColor" stroke-linejoin="round"/></symbol>
+    <symbol id="pause" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14" stroke-width="3"/></symbol>
+    <symbol id="expand" viewBox="0 0 24 24"><path d="M9 4H4v5m11-5h5v5M4 15v5h5m11-5v5h-5"/></symbol>
+    <symbol id="sound" viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4V5zm4 4a4 4 0 0 1 0 6m2.5-8.5a7.8 7.8 0 0 1 0 11"/></symbol>
+    <symbol id="muted" viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4V5zm5 4 5 6m0-6-5 6"/></symbol>
+    <symbol id="reset" viewBox="0 0 24 24"><path d="M4 10a8 8 0 1 1 1 7M4 5v5h5"/></symbol>
+    <symbol id="keyboard" viewBox="0 0 24 24"><rect x="2.5" y="5.5" width="19" height="13" rx="2"/><path d="M6.5 9.5h1m4 0h1m4 0h1m-11 4h1m4 0h5.5"/></symbol>
+    <symbol id="grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></symbol>
+    <symbol id="close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="external" viewBox="0 0 24 24"><path d="M8 16 17 7M9 7h8v8"/></symbol>
+  </svg>
+
+  <header class="masthead">
+    <a class="brand" href="index.html" aria-label="Charly the Clown home">
+      <span class="brand-icon"><img src="assets/charly.png" alt="" width="36" height="36"></span>
+      <span>Charly the Clown<small>RUN FOR FUN</small></span>
+    </a>
+    <nav class="top-actions" aria-label="Game menu">
+      <button class="top-button" id="show-levels" type="button"><svg><use href="#grid"/></svg> Levels</button>
+      <button class="top-button" id="show-controls" type="button"><svg><use href="#keyboard"/></svg> Controls</button>
+      <button class="top-button" id="quit-game" type="button" hidden>Quit</button>
+    </nav>
+  </header>
+
+  <main class="layout">
+    <section class="cabinet" id="cabinet" aria-label="Charly the Clown arcade">
+      <div class="cabinet-top">
+        <div class="level"><span class="led"></span><span id="level-number">LEVEL 01</span><span class="rule"></span><span class="level-name" id="level-name">IT'S EASY</span></div>
+        <div class="tools">
+          <button id="restart" type="button" class="tool" aria-label="Restart level" title="Restart level" hidden><svg><use href="#reset"/></svg></button>
+          <button id="pause-game" type="button" class="tool" aria-label="Pause" title="Pause" hidden><svg><use href="#pause"/></svg></button>
+          <button id="toggle-sound" type="button" class="tool" aria-label="Mute" title="Mute" aria-pressed="false"><svg><use href="#sound"/></svg></button>
+          <button id="fullscreen" type="button" class="tool" aria-label="Fullscreen" title="Fullscreen"><svg><use href="#expand"/></svg></button>
+        </div>
+      </div>
+
+      <div class="screen" id="screen" data-state="cover">
+        <div class="cover" id="cover">
+          <div class="title-block">
+            <p class="eyebrow"><span></span> A REMAKE OF THE 1996 PLATFORMER</p>
+            <h1><span>CHARLY</span><span>THE CLOWN</span></h1>
+            <p class="tagline">RUN FOR FUN</p>
+            <button class="primary" id="start" type="button"><svg><use href="#play"/></svg> <span id="start-label">Play Level 1</span></button>
+            <nav id="title-tools" class="title-tools" aria-label="Game settings" hidden></nav>
+            <p class="shortcut">Press <kbd>Enter</kbd> to start</p>
+          </div>
+        </div>
+        <div class="game-slot" id="game-slot">
+          <div id="stage-notice" class="stage-notice" role="status" hidden></div>
+          <div class="game-backdrop" aria-hidden="true"><img alt=""><div class="backdrop-tint"></div></div>
+          <canvas id="game-canvas" tabindex="0" role="img" aria-label="Level 1 gameplay"></canvas>
+          <div class="game-vignette" aria-hidden="true"></div>
+          <div class="hud" aria-label="Game statistics">
+            <div class="hud-group">
+              <div class="hud-item"><span class="hearts" id="health" aria-label="5 of 5 health">♥♥♥♥♥</span><small>HEALTH</small></div>
+              <div class="hud-item"><span id="lives">05</span><small>LIVES</small></div>
+            </div>
+            <div class="hud-group">
+              <div class="hud-item hud-coins"><span id="coins">00</span><small>COINS</small></div>
+              <div class="hud-item hud-marbles"><span id="ammo">00</span><small>MARBLES</small></div>
+              <div class="hud-item"><span id="score">00000</span><small>SCORE</small></div>
+            </div>
+          </div>
+        </div>
+        <div class="screen-overlay" id="overlay" hidden>
+          <div class="overlay-dialog">
+            <p class="eyebrow" id="overlay-kicker">LEVEL 01</p>
+            <h2 id="overlay-title">Loading</h2>
+            <p id="overlay-detail" role="status"></p>
+            <button class="primary" id="overlay-action" type="button" hidden></button>
+            <button class="quiet-button" id="back-to-cover" type="button">Back to title</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="touch-controls" id="touch-controls" hidden aria-label="Touch controls">
+        <div><button type="button" data-control="left" aria-label="Move left">←</button><button type="button" data-control="right" aria-label="Move right">→</button><button type="button" data-control="duck" aria-label="Duck, enter, or drop">↓</button></div>
+        <div><button type="button" data-control="throw" aria-label="Throw a marble">THROW</button><button type="button" data-control="jump" aria-label="Jump">JUMP</button></div>
+      </div>
+    </section>
+
+    <section class="under-screen" aria-label="Level information">
+      <div class="intro">
+
+        <h2 id="stage-heading">The 25-level campaign</h2>
+        <p id="stage-objective">Find the exit and look for hidden bonus routes.</p>
+      </div>
+      <dl class="key-guide">
+        <div><dt><kbd>←</kbd><kbd>→</kbd></dt><dd>Move</dd></div>
+        <div><dt><kbd>↑</kbd></dt><dd>Jump</dd></div>
+        <div><dt><kbd>↓</kbd></dt><dd>Duck / Enter</dd></div>
+        <div><dt><kbd>Space</kbd></dt><dd>Throw</dd></div>
+      </dl>
+    </section>
+
+    <footer>
+      <span>Original game by White Magic · 1996</span>
+      <a href="https://www.dosgamesarchive.com/download/charly-the-clown" target="_blank" rel="noopener">DOS Games Archive <svg><use href="#external"/></svg></a>
+    </footer>
+  </main>
+
+  <dialog id="levels" class="level-picker">
+    <div class="dialog-head">
+      <div><h2>Choose a level</h2><p id="level-progress">0 of 25 cleared</p></div>
+      <form method="dialog"><button class="tool" aria-label="Close levels"><svg><use href="#close"/></svg></button></form>
+    </div>
+    <div class="level-grid" id="level-grid"></div>
+  </dialog>
+
+  <dialog id="controls">
+    <div class="dialog-head">
+      <h2>Controls</h2>
+      <form method="dialog"><button class="tool" aria-label="Close controls"><svg><use href="#close"/></svg></button></form>
+    </div>
+    <dl>
+      <div><dt>Move</dt><dd><kbd>←</kbd> <kbd>→</kbd> or <kbd>A</kbd> <kbd>D</kbd></dd></div>
+      <div><dt>Jump</dt><dd><kbd>↑</kbd> or <kbd>W</kbd></dd></div>
+      <div><dt>Duck, enter a door, or drop through a cable</dt><dd><kbd>↓</kbd> or <kbd>S</kbd></dd></div>
+      <div><dt>Throw a marble</dt><dd><kbd>Space</kbd> or <kbd>X</kbd></dd></div>
+      <div><dt id="escape-help">Pause or resume</dt><dd><kbd>Esc</kbd></dd></div>
+    </dl>
+    <p>Tap for a short jump or hold to jump higher. Hit question boxes from below. On flying stages, ↑ and ↓ steer and Throw fires without marbles.</p>
+  </dialog>
+</body>
+</html>
