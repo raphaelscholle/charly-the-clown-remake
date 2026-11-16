@@ -408,3 +408,53 @@ function sceneryTerrain(number) {
 function sceneryCell(level, x, y) {
   return (y / 16 + 3) * level.columns + x / 16;
 }
+test('POING: land on the moving ball, grab the chain, and drop back off', () => {
+  const game = new Game();
+  game.reset(4);
+  const ball = game.props.find(prop => prop.type === 8 && prop.x === 3171);
+  game.time = 2.2;
+  game.moveProps();
+  game.player = game.createPlayer({ x: ball.currentX + ball.w / 2, y: ball.currentY - 4 });
+  game.player.invulnerable = 5;
+  for (let i = 0; i < 45 && game.player.riding !== ball; i++) game.step(STEP);
+  assert.equal(game.player.riding, ball);
+  game.input('right', true);
+  game.input('jump', true);
+  for (let i = 0; i < 100 && !game.player.hanging; i++) game.step(STEP);
+  assert.equal(game.player.hanging?.type, 12);
+  assert.equal(game.player.hanging.currentY, 411);
+  assert.ok(game.player.y > game.player.hanging.currentY);
+  game.input('duck', true);
+  assert.equal(game.player.hanging, null);
+  game.step(STEP);
+  assert.ok(game.player.vy > 0);
+});
+
+test('ramp joins overlap both endpoints, preserving the grass at the seam', () => {
+  const terrain = sceneryTerrain(3);
+  assert.ok(terrain.slopeEnds.size > 0);
+  const path = () => ({
+    segments: [],
+    moveTo(...xy) { this.segments.push(xy); },
+    lineTo(...xy) { this.segments.push(xy); },
+    closePath() {},
+  });
+  const ramp = terrain.level.ramps.find(r => r.x === 2816);
+  const cap = path();
+  terrain.paintSlopes(path(), cap, path(), { ...terrain.level, ramps: [ramp] },
+    { x: 2700, y: 1100, right: 3100, bottom: 1350 });
+  assert.ok(cap.segments[0][0] < ramp.x);
+  assert.ok(cap.segments[1][0] > ramp.x + ramp.w);
+});
+
+test('extra scenery is deterministic and rests on mapped collision floors', () => {
+  const first = sceneryTerrain(1);
+  const second = sceneryTerrain(1);
+  const details = terrain => terrain.objects.filter(item => item.groundDetail);
+  assert.ok(details(first).length >= 4);
+  assert.deepEqual(details(first), details(second));
+  for (const item of details(first)) {
+    const flag = Charly.at(first.level, Math.floor(item.x / 16), item.y / 16 + 2) & 127;
+    assert.ok(flag === 1 || flag === 5);
+  }
+});

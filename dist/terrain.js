@@ -8,6 +8,7 @@
   const PAD = SIZE;
   const MAX_CHUNKS = 56;
   const RAMP_DEPTH = SIZE;
+  const SURFACE_JOIN = 1.5;
   const rectangle = (bounds, x, y, w, h) =>
     x + w > bounds.x && x < bounds.right && y + h > bounds.y && y < bounds.bottom;
   const scenery = [
@@ -41,6 +42,7 @@
       this.occupied = new Set();
       this.level = null;
       this.slopeTiles = new Map();
+      this.slopeEnds = new Map();
     }
 
     prepare(level) {
@@ -50,6 +52,7 @@
       this.chunks.clear();
       this.occupied.clear();
       this.slopeTiles.clear();
+      this.slopeEnds.clear();
       const candidates = new Map();
       const details = new Map();
       this.objects = [];
@@ -98,6 +101,7 @@
       if (!level.flight) this.prepareSlopes(level);
       this.hideDetachedRocks(level);
       this.placeScenery(level, stamps);
+      if (!level.flight) this.decorateGround(level);
       if (!level.snow && !level.flight) this.objects.push(...details.values());
       for (const [index, cell] of this.cells) {
         if (this.coveredTiles.has(index)) continue;
@@ -251,15 +255,50 @@
       }
     }
 
+    decorateGround(level) {
+      const art = ['redrawn-fern', 'redrawn-palm', 'redrawn-mushrooms', 'redrawn-scree'];
+      const sizes = [[25, 21], [22, 23], [19, 14], [34, 10]];
+      const ground = [];
+      for (let row = 4; row < level.art.length; row++) {
+        for (let col = 2; col + 2 < level.columns; col++) {
+          const index = row * level.columns + col;
+          if (!this.cells.get(index)?.rock || this.coveredTiles.has(index) || this.slopeTiles.has(index)) continue;
+          if (![col-1,col,col+1].every(x => (at(level, x, row - 1) & 127) === 1 ||
+            (at(level, x, row - 1) & 127) === 5)) continue;
+          if ((at(level, col, row - 2) & 127) || (at(level, col, row - 3) & 127) ||
+              (at(level, col, row - 4) & 127)) continue;
+          const hash = ((Math.imul(index + 1, 1597334677) ^ Math.imul(level.number, 3812015801)) >>> 0);
+          if (hash % 17 !== 0) continue;
+          const x = col * SIZE + SIZE / 2;
+          const y = (row - 3) * SIZE;
+          if (this.objects.some(o => Math.abs(x - o.x) < o.w / 2 + 19 && Math.abs(y - o.y) < 23) ||
+              ground.some(o => Math.abs(x - o.x) < 43 && Math.abs(y - o.y) < 20) ||
+              level.gates.some(o => x > o.x - 28 && x < o.x + o.w + 28 && Math.abs(y - o.y - o.h) < 48) ||
+              level.props.some(o => x > o.x - 16 && x < o.x + o.w + 16 && Math.abs(y - o.y) < 24) ||
+              level.pickups.some(o => Math.abs(x - o.x) < 18 && y - o.y >= 0 && y - o.y < 34)) continue;
+          const kind = level.snow ? 3 : (hash >>> 6) % art.length;
+          const [w, h] = sizes[kind];
+          ground.push({ art: art[kind], x, y, w, h, groundDetail: true });
+        }
+      }
+      this.objects.push(...ground);
+    }
+
     prepareSlopes(level) {
       const distances = new Map();
       for (const ramp of level.ramps) {
+        for (const x of [ramp.x, ramp.x + ramp.w]) {
+          const col = Math.floor(x / SIZE);
+          const ends = this.slopeEnds.get(col) ?? [];
+          ends.push({ x, y: rampHeight(ramp, x) });
+          this.slopeEnds.set(col, ends);
+        }
         const right = ramp.x + ramp.w;
         const low = ramp.y + ramp.h;
         const firstCol = Math.max(0, Math.floor(ramp.x / SIZE));
         const lastCol = Math.min(level.columns - 1, Math.ceil(right / SIZE) - 1);
         for (let col = firstCol; col <= lastCol; col++) {
-          const sampleX = (Math.max(ramp.x, col * SIZE) + Math.min(right, (col + 1) * SIZE)) / 2;
+          const sampleX = Math.max(ramp.x, Math.min(right, col * SIZE + SIZE / 2));
           const surface = rampHeight(ramp, sampleX);
           const firstRow = Math.max(0, Math.floor((ramp.y - 32) / SIZE) + 3);
           const lastRow = Math.min(level.art.length - 1, Math.floor((surface + RAMP_DEPTH) / SIZE) + 3);
@@ -317,8 +356,8 @@
       if (level.flight) return;
       for (const ramp of level.ramps) {
         if (!rectangle(bounds, ramp.x, ramp.y, ramp.w, ramp.h + RAMP_DEPTH)) continue;
-        const left = ramp.x;
-        const right = left + ramp.w;
+        const left = ramp.x - SURFACE_JOIN;
+        const right = ramp.x + ramp.w + SURFACE_JOIN;
         const leftY = rampHeight(ramp, left);
         const rightY = rampHeight(ramp, right);
         const band = level.snow ? 4.7 : 4.4;
@@ -410,12 +449,14 @@
       const lastRow = Math.min(level.art.length, Math.ceil((camera.y + height) / SIZE) + 4);
       const rock = new Path2D();
       const cap = new Path2D();
+      const recess = new Path2D();
       const rim = new Path2D();
       const fixtures = [];
       const cellAt = (col, row) => col >= 0 && col < level.columns && this.cells.get(row * level.columns + col);
       const solid = (col,row) => {
         const cell = cellAt(col,row);
-        return !this.coveredTiles.has(row * level.columns + col) && (cell?.rock || cell?.stone);
+        const index = row * level.columns + col;
+        return !this.coveredTiles.has(index) && !this.slopeTiles.has(index) && (cell?.rock || cell?.stone);
       };
       for (let row = firstRow; row < lastRow; row++) {
         const y = (row - 3) * SIZE;
@@ -439,8 +480,13 @@
           const topLeft = y;
           const topRight = y;
           const open = !solid(col,row-1);
-          const leftRadius = open && !solid(col-1,row) ? 2.25 : 0;
-          const rightRadius = open && !solid(col+1,row) ? 2.25 : 0;
+          const joinsSlope = x => {
+            const endCol = Math.floor(x / SIZE);
+            return [-1, 0].some(offset => this.slopeEnds.get(endCol + offset)?.some(end =>
+              Math.abs(end.x - x) <= 3 && Math.abs(end.y - y) <= 3));
+          };
+          const leftRadius = open && !solid(col-1,row) && !joinsSlope(x) ? 2.25 : 0;
+          const rightRadius = open && !solid(col+1,row) && !joinsSlope(x + SIZE) ? 2.25 : 0;
           const bottom = y + SIZE + .03;
           rock.moveTo(x, Math.min(bottom,topLeft + leftRadius));
           rock.quadraticCurveTo(x,topLeft,x + leftRadius,topLeft);
@@ -449,7 +495,11 @@
           rock.lineTo(x + SIZE,bottom);
           rock.lineTo(x,bottom);
           rock.closePath();
-          if (open) {
+          if (!collision && !this.slopeTiles.has((row - 1) * level.columns + col) &&
+              ![1, 4, 5, 9, 10].includes(at(level, col, row - 2) & 127)) {
+            recess.rect(x, y, SIZE, SIZE + .03);
+          }
+          if (open && [1, 4, 5, 9, 10].includes(collision)) {
             const depth = level.snow ? 4.7 : 4.4;
             cap.moveTo(x,topLeft + leftRadius);
             cap.quadraticCurveTo(x,topLeft,x + leftRadius,topLeft);
@@ -474,6 +524,11 @@
       ctx.fill(rock);
       ctx.save();
       ctx.clip(rock);
+      ctx.save();
+      ctx.fillStyle = '#100e2070';
+      ctx.filter = 'blur(7px)';
+      ctx.fill(recess);
+      ctx.restore();
       ctx.fillStyle = this.pattern(ctx,level.snow ? 'frost' : 'moss',61);
       ctx.fill(cap);
       ctx.strokeStyle = level.snow ? '#c8e5f8c0' : '#c9ac6e76';

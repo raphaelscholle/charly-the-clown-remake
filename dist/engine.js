@@ -10,6 +10,7 @@
   const CRUMBLE_FRAME = .042;
   const CRUMBLE_ANIMATION = 6 * CRUMBLE_FRAME;
   const BALL_RADIUS = 4;
+  const GRIP_HEIGHT = 38;
   const clamp = (value, min, max) => Math.max(min, Math.min(value, max));
   const near = (a, b, tolerance) => Math.abs(a - b) < tolerance;
   const range = (a, b) => [Math.floor(a), Math.floor(b)];
@@ -54,6 +55,13 @@
       ramps: events.filter(item => item.type === 1 && item.w > 4),
       checkpoints: events.filter(item => item.type === 3),
     };
+    if (number === 4) {
+      const chain = value.props.find(prop => prop.type === 12 && prop.x === 3316 && prop.y === 411);
+      if (chain) {
+        // Extend the grip to the ball side of the shaft wall.
+        value.props.push({ ...chain, id: -1, x: 3275, w: chain.x - 3275 });
+      }
+    }
     stages.set(number, value);
     return value;
   }
@@ -179,7 +187,7 @@
     input(action, pressed) {
       if (pressed && !this.keys.has(action)) {
         if (action === 'jump') this.jumpBuffer = .14;
-        if (action === 'duck' && this.player.riding?.type === 12) this.dropFromCable();
+        if (action === 'duck' && (this.player.hanging || this.player.riding?.type === 12)) this.dropFromCable();
         if (action === 'throw') this.throwMarble();
       }
       if (pressed) this.keys.add(action);
@@ -188,7 +196,8 @@
 
     dropFromCable() {
       const p = this.player;
-      p.dropCableY = p.riding.currentY;
+      p.dropCableY = (p.hanging ?? p.riding).currentY;
+      p.hanging = null;
       p.riding = null;
       p.grounded = false;
       p.coyote = 0;
@@ -267,9 +276,39 @@
       if (this.keys.has('throw')) this.throwMarble();
     }
 
+    holdCable(player, direction, dt) {
+      const cable = player.hanging;
+      const x = player.x + direction * 88 * dt;
+      const next = this.props.find(prop => prop.type === 12 && prop.currentY === cable.currentY &&
+        x >= prop.currentX - 2 && x <= prop.currentX + prop.w + 2);
+      if (!next) {
+        this.dropFromCable();
+        return false;
+      }
+      player.hanging = next;
+      player.y = next.currentY + GRIP_HEIGHT;
+      player.vy = 0;
+      player.invulnerable = Math.max(0, player.invulnerable - dt);
+      this.moveAcross(player, x);
+      if (direction) player.face = direction;
+      return true;
+    }
+
     movePlayer(dt) {
       const p = this.player;
       const direction = Number(this.keys.has('right')) - Number(this.keys.has('left'));
+      if (p.hanging) {
+        if (this.jumpBuffer > 0) {
+          p.dropCableY = p.hanging.currentY;
+          p.hanging = null;
+          p.vy = -JUMP_SPEED;
+          this.jumpBuffer = 0;
+          this.event('jump');
+        } else if (this.holdCable(p, direction, dt)) {
+          this.checkHazard();
+          return;
+        }
+      }
       if (p.riding) {
         if (this.supports(p.riding)) {
           p.x += p.riding.shiftX;
@@ -332,7 +371,7 @@
 
     moveVertical(p, nextY) {
       const before = p.y;
-      if (before > (p.dropCableY ?? Infinity) + 6) p.dropCableY = undefined;
+      if (p.dropCableY !== undefined && (before > p.dropCableY + GRIP_HEIGHT + 6 || before < p.dropCableY - 2)) p.dropCableY = undefined;
       const reach = p.vy >= 0 ? nextY : nextY - p.height;
       const origin = p.vy >= 0 ? before : before - p.height;
       const rising = p.vy < 0;
@@ -342,6 +381,24 @@
       p.riding = null;
       p.grounded = false;
       if (rising) {
+        if (this.keys.has('jump') && !this.keys.has('duck')) {
+          const cable = this.props.find(prop => prop.type === 12 && prop.currentY !== p.dropCableY &&
+            before >= prop.currentY + GRIP_HEIGHT && nextY <= prop.currentY + GRIP_HEIGHT &&
+            p.x >= prop.currentX - 3 && p.x <= prop.currentX + prop.w + 3);
+          if (cable) {
+            const gripY = cable.currentY + GRIP_HEIGHT;
+            const col = Math.floor(p.x / SIZE);
+            const flag = mask(this.level, col, Math.floor((gripY - p.height) / SIZE) + 2);
+            if (flag === 0 || flag > 10) {
+              p.hanging = cable;
+              p.y = gripY;
+              p.vy = 0;
+              p.coyote = 0;
+              this.jumpBuffer = 0;
+              return;
+            }
+          }
+        }
         let roof = -Infinity;
         for (let row = firstRow; row <= lastRow; row++) {
           const bottom = (row - 1) * SIZE;

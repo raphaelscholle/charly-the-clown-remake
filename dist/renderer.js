@@ -69,6 +69,7 @@
       if (snap) {
         this.level = game.level;
         this.terrain.prepare(game.level);
+        this.prepareChains(game.level.props);
       }
       const targetX = clamp(p.x - this.width * .42 + p.vx * .19, 0, game.level.width - this.width);
       const targetY = clamp(p.y - (game.level.flight ? 112 : 151), 0, MAP_HEIGHT - this.height + 10);
@@ -82,6 +83,7 @@
       ctx.save();
       ctx.translate(-this.camera.x, -this.camera.y);
       this.terrain.drawTiles(this, false, scale);
+      this.drawChains();
       this.props(game);
       this.drawGates(game);
       this.objects(game);
@@ -244,6 +246,78 @@
       ctx.restore();
     }
 
+    prepareChains(props) {
+      this.chains = [];
+      const pieces = props.filter(prop => prop.type === 12).sort((a, b) => a.y - b.y || a.x - b.x);
+      for (const { x, y, w } of pieces) {
+        const previous = this.chains.at(-1);
+        if (previous && previous.y === y && x <= previous.right + 2) {
+          previous.right = Math.max(previous.right, x + w);
+        } else {
+          this.chains.push({ x, y, right: x + w });
+        }
+      }
+      for (const span of this.chains) {
+        span.anchors = props.filter(prop => prop.type === 10 && Math.abs(prop.y - span.y) <= 5 &&
+          prop.x >= span.x + 8 && prop.x <= span.right - 8).map(prop => prop.x + prop.w / 2);
+      }
+    }
+
+    drawChains() {
+      for (const { x, y, right, anchors } of this.chains) {
+        if (this.visible(x - 5, y - 7, right - x + 10, 18)) this.chain(x, y, right - x, anchors);
+      }
+    }
+
+    chain(x, y, width, anchors) {
+      const { ctx } = this;
+      const stop = x + width;
+      const steel = ctx.createLinearGradient(x, y - 2, x, y + 7);
+      steel.addColorStop(0, '#fff3d4');
+      steel.addColorStop(.26, '#c4a07c');
+      steel.addColorStop(.55, '#766563');
+      steel.addColorStop(1, '#413743');
+      const count = Math.max(1, Math.round(width / 8));
+      const spacing = width / count;
+      const first = Math.max(0, Math.floor((this.camera.x - x) / spacing) - 2);
+      const last = Math.min(count, Math.ceil((this.camera.x + this.width - x) / spacing) + 2);
+      const linkY = index => y + 1.2 + Math.sin(index / count * Math.PI);
+      ctx.save();
+      ctx.lineJoin = 'round';
+      for (const parity of [0, 1]) {
+        ctx.beginPath();
+        for (let i = first; i < last; i++) {
+          if (i % 2 !== parity) continue;
+          const cx = x + (i + .5) * spacing;
+          const cy = linkY(i + .5);
+          const h = parity ? 2.2 : 5.3;
+          ctx.roundRect(cx - spacing * .62, cy - h / 2, spacing * 1.24, h, h / 2);
+        }
+        ctx.strokeStyle = '#201925';
+        ctx.lineWidth = 2.9;
+        ctx.stroke();
+        ctx.strokeStyle = steel;
+        ctx.lineWidth = 1.58;
+        ctx.stroke();
+      }
+      for (const cx of [x + .5, ...anchors, stop - .5]) {
+        if (!this.visible(cx - 5, y - 6, 10, 12)) continue;
+        const cy = linkY((cx - x) / spacing);
+        ctx.beginPath();
+        ctx.roundRect(cx - 2.6, cy - 4.3, 5.2, 8.8, 1.6);
+        ctx.fillStyle = '#2b202c';
+        ctx.fill();
+        ctx.strokeStyle = steel;
+        ctx.lineWidth = .85;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(cx, cy - .4, 1.25, 0, 2 * Math.PI);
+        ctx.fillStyle = '#d7b48e';
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
     props(game) {
       const ctx = this.ctx;
       const phase = game.time;
@@ -261,8 +335,6 @@
           this.hardware(x + w * .22, y + 9, w * .56, Math.min(h - 9, 10));
         } else if (type === 14) {
           this.water(x, y, w, h, phase);
-        } else if (type === 12) {
-          this.hardware(x, y, w, 4);
         } else if (type === 4) {
           const frame = game.woodFrame(prop);
           if (frame < 7) this.timber(x, y, w, h, frame);
@@ -505,7 +577,7 @@
 
     hint(game) {
       const p = game.player;
-      if (p.riding?.type === 12) {
+      if (p.hanging || p.riding?.type === 12) {
         this.actionHint(p.x, p.y - 42, '↓ Drop');
         return;
       }
@@ -607,6 +679,36 @@
       const p = game.player;
       if (game.level.flight) {
         this.aircraft(p, game.time);
+        return;
+      }
+      if (p.hanging) {
+        const body = this.images['charly-jump'];
+        const h = 36;
+        const w = h * body.width / body.height;
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.scale(p.face, 1);
+        const grip = p.hanging.currentY - p.y + 2;
+        ctx.beginPath();
+        ctx.moveTo(4.6, -19);
+        ctx.quadraticCurveTo(15, -25, 9, grip + 2);
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = '#594043';
+        ctx.lineWidth = 6.3;
+        ctx.stroke();
+        ctx.strokeStyle = '#ddbf9d';
+        ctx.lineWidth = 4.4;
+        ctx.stroke();
+        ctx.drawImage(body, -w / 2, -h + 2, w, h);
+        const glove = ctx.createRadialGradient(7, grip - 1, .4, 9, grip, 4.3);
+        glove.addColorStop(0, '#ffb27d');
+        glove.addColorStop(.32, '#ea5142');
+        glove.addColorStop(1, '#6f181e');
+        ctx.fillStyle = glove;
+        ctx.beginPath();
+        ctx.ellipse(9, grip, 4, 3.6, -.26, 0, 2 * Math.PI);
+        ctx.fill();
+        ctx.restore();
         return;
       }
       const jumping = !p.grounded;
