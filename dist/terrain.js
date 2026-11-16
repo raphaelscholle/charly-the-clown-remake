@@ -9,6 +9,29 @@
   const MAX_CHUNKS = 56;
   const RAMP_DEPTH = SIZE;
   const SURFACE_JOIN = 1.5;
+  const CURVE_RADIUS = 5;
+  const SECTION = CHUNK + PAD * 2;
+  const canvasFor = size => {
+    if (typeof OffscreenCanvas !== 'undefined') return new OffscreenCanvas(size, size);
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = size;
+    return canvas;
+  };
+
+  function averageMask(input, output, stride) {
+    const step = stride === 1 ? SECTION : 1;
+    const span = CURVE_RADIUS * 2 + 1;
+    for (let line = 0; line < SECTION; line++) {
+      const start = line * step;
+      let sum = 0;
+      for (let n = 0; n < CURVE_RADIUS; n++) sum += input[start + n * stride];
+      for (let n = 0; n < SECTION; n++) {
+        if (n + CURVE_RADIUS < SECTION) sum += input[start + (n + CURVE_RADIUS) * stride];
+        output[start + n * stride] = sum / span;
+        if (n >= CURVE_RADIUS) sum -= input[start + (n - CURVE_RADIUS) * stride];
+      }
+    }
+  }
   const rectangle = (bounds, x, y, w, h) =>
     x + w > bounds.x && x < bounds.right && y + h > bounds.y && y < bounds.bottom;
   const scenery = [
@@ -43,6 +66,7 @@
       this.level = null;
       this.slopeTiles = new Map();
       this.slopeEnds = new Map();
+      this.rockLayer = null;
     }
 
     prepare(level) {
@@ -353,9 +377,11 @@
     }
 
     paintSlopes(rock, cap, rim, level, bounds) {
-      if (level.flight) return;
+      if (level.flight) return false;
+      let visible = false;
       for (const ramp of level.ramps) {
         if (!rectangle(bounds, ramp.x, ramp.y, ramp.w, ramp.h + RAMP_DEPTH)) continue;
+        visible = true;
         const left = ramp.x - SURFACE_JOIN;
         const right = ramp.x + ramp.w + SURFACE_JOIN;
         const leftY = rampHeight(ramp, left);
@@ -371,6 +397,7 @@
         rim.moveTo(left, leftY + .3);
         rim.lineTo(right, rightY + .3);
       }
+      return visible;
     }
 
     chunkKey(x, y, front) {
@@ -386,11 +413,8 @@
         this.chunks.set(key, image);
         return image;
       }
-      const size = CHUNK + PAD * 2;
-      const pixels = size * CACHE_SCALE;
-      const canvas = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(pixels, pixels) : document.createElement('canvas');
-      if (canvas.width !== pixels) canvas.width = pixels;
-      if (canvas.height !== pixels) canvas.height = pixels;
+      const size = SECTION;
+      const canvas = canvasFor(size * CACHE_SCALE);
       const ctx = canvas.getContext('2d');
       const camera = { x: x * CHUNK - PAD, y: y * CHUNK - PAD };
       ctx.setTransform(CACHE_SCALE, 0, 0, CACHE_SCALE, -camera.x * CACHE_SCALE, -camera.y * CACHE_SCALE);
@@ -442,6 +466,63 @@
       }
     }
 
+    rockMask(rock, camera) {
+      if (!this.rockLayer) {
+        const canvas = canvasFor(SECTION);
+        this.rockLayer = {
+          mask: canvas.getContext('2d', { willReadFrequently: true }),
+          paint: canvasFor(SECTION * CACHE_SCALE).getContext('2d'),
+          alpha: new Uint8ClampedArray(SECTION * SECTION),
+          buffer: new Uint8ClampedArray(SECTION * SECTION),
+        };
+      }
+      const { mask, alpha, buffer } = this.rockLayer;
+      mask.resetTransform();
+      mask.clearRect(0, 0, SECTION, SECTION);
+      mask.translate(-camera.x, -camera.y);
+      mask.fill(rock);
+      const image = mask.getImageData(0, 0, SECTION, SECTION);
+      const pixels = image.data;
+      for (let i = 0; i < alpha.length; i++) alpha[i] = pixels[i * 4 + 3];
+      // Filtering the union keeps joins continuous across tiles and padded cache sections.
+      averageMask(alpha, buffer, 1);
+      averageMask(buffer, alpha, SECTION);
+      averageMask(alpha, buffer, 1);
+      averageMask(buffer, alpha, SECTION);
+      for (let i = 0; i < alpha.length; i++) pixels[i * 4 + 3] = (alpha[i] - 117) * 12;
+      mask.putImageData(image, 0, 0);
+      return mask.canvas;
+    }
+
+    paintRock(ctx, camera, level, scale, paths) {
+      const { rock, cap, rim, recess } = paths;
+      const mask = this.rockMask(rock, camera);
+      const paint = this.rockLayer.paint;
+      const pixels = SECTION * scale;
+      paint.resetTransform();
+      paint.clearRect(0, 0, pixels, pixels);
+      paint.save();
+      paint.setTransform(scale, 0, 0, scale, -camera.x * scale, -camera.y * scale);
+      paint.fillStyle = this.pattern(paint, level.snow ? 'frost' : 'basalt', 103);
+      paint.fillRect(camera.x, camera.y, SECTION, SECTION);
+      paint.save();
+      paint.fillStyle = '#100e2070';
+      paint.filter = 'blur(7px)';
+      paint.fill(recess);
+      paint.restore();
+      paint.fillStyle = this.pattern(paint, level.snow ? 'frost' : 'moss', 61);
+      paint.fill(cap);
+      paint.strokeStyle = paint.fillStyle;
+      paint.lineJoin = paint.lineCap = 'round';
+      paint.lineWidth = 4.5;
+      paint.stroke(rim);
+      paint.resetTransform();
+      paint.globalCompositeOperation = 'destination-in';
+      paint.drawImage(mask, 0, 0, pixels, pixels);
+      paint.restore();
+      ctx.drawImage(paint.canvas, 0, 0);
+    }
+
     paintTiles({ ctx, camera, width, height }, level, front, scale) {
       const firstCol = Math.max(0, Math.floor(camera.x / SIZE) - 1);
       const lastCol = Math.min(level.columns, Math.ceil((camera.x + width) / SIZE) + 1);
@@ -452,6 +533,7 @@
       const recess = new Path2D();
       const rim = new Path2D();
       const fixtures = [];
+      let hasRock = false;
       const cellAt = (col, row) => col >= 0 && col < level.columns && this.cells.get(row * level.columns + col);
       const solid = (col,row) => {
         const cell = cellAt(col,row);
@@ -472,6 +554,7 @@
             fixtures.push({ x, y, row, col, cell, flag });
             continue;
           }
+          hasRock = true;
           const slope = this.slopeTiles.get(row * level.columns + col);
           if (slope) {
             this.trimSlopeTile(rock, x, y, slope);
@@ -514,28 +597,13 @@
           }
         }
       }
-      if (!front) this.paintSlopes(rock, cap, rim, level, {
+      if (!front) hasRock = this.paintSlopes(rock, cap, rim, level, {
         x: camera.x, y: camera.y, right: camera.x + width, bottom: camera.y + height,
-      });
+      }) || hasRock;
       ctx.save();
       if (front) ctx.globalAlpha = .88;
-      const stone = level.snow ? 'frost' : 'basalt';
-      ctx.fillStyle = this.pattern(ctx,stone,103);
-      ctx.fill(rock);
-      ctx.save();
-      ctx.clip(rock);
-      ctx.save();
-      ctx.fillStyle = '#100e2070';
-      ctx.filter = 'blur(7px)';
-      ctx.fill(recess);
-      ctx.restore();
-      ctx.fillStyle = this.pattern(ctx,level.snow ? 'frost' : 'moss',61);
-      ctx.fill(cap);
-      ctx.strokeStyle = level.snow ? '#c8e5f8c0' : '#c9ac6e76';
-      ctx.lineWidth = .6;
-      ctx.stroke(rim);
-      ctx.restore();
       ctx.setTransform(1,0,0,1,0,0);
+      if (hasRock) this.paintRock(ctx, camera, level, scale, { rock, cap, rim, recess });
       for (const {x,y,col,row,cell,flag} of fixtures) {
         const left = Math.round((x - camera.x)*scale);
         const top = Math.round((y - camera.y)*scale);
@@ -573,9 +641,11 @@
       wood.addColorStop(.18,'#825139');
       wood.addColorStop(1,'#3c2224');
       ctx.fillStyle = wood;
-      ctx.fillRect(0,0,16,height);
+      ctx.beginPath();
+      ctx.roundRect(0,0,16,height,height === 5 ? 1.8 : .65);
+      ctx.fill();
       ctx.fillStyle = '#e6af7469';
-      ctx.fillRect(0,.5,16,.5);
+      ctx.fillRect(1.6,.5,12.8,.5);
       ctx.fillStyle = '#d3a378';
       ctx.beginPath();
       ctx.arc(3,Math.min(2,height/2),.65,0,Math.PI*2);
